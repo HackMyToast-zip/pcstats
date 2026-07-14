@@ -1,62 +1,99 @@
 import psutil
 import time
 import platform
+import subprocess
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
 
 console = Console()
 
-def get_size(bytes):
+old_net = psutil.net_io_counters()
+
+def size(bytes):
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if bytes < 1024:
             return f"{bytes:.1f}{unit}"
         bytes /= 1024
 
-def create_table():
-    table = Table(title="PC Stats Dashboard")
+def get_cpu():
+    return platform.processor() or "Unknown"
+
+def get_gpu():
+    try:
+        result = subprocess.check_output(
+            ["lspci"]
+        ).decode()
+
+        for line in result.splitlines():
+            if "VGA" in line or "3D" in line:
+                return line.split(": ", 1)[-1]
+    except:
+        pass
+
+    return "Unknown"
+
+def dashboard():
+    global old_net
+
+    table = Table(title="PC Stats Dashboard v1.2")
 
     table.add_column("Component")
     table.add_column("Value")
 
-    # CPU
+    cpu = psutil.cpu_percent()
+    freq = psutil.cpu_freq()
+
+    table.add_row("CPU", get_cpu())
+    table.add_row("CPU Usage", f"{cpu}%")
+
+    if freq:
+        table.add_row(
+            "CPU Speed",
+            f"{freq.current/1000:.2f} GHz"
+        )
+
     table.add_row(
-        "CPU Usage",
-        f"{psutil.cpu_percent()}%"
+        "GPU",
+        get_gpu()
     )
 
-    # CPU info
-    table.add_row(
-        "CPU Cores",
-        f"{psutil.cpu_count(logical=True)} threads"
-    )
-
-    # RAM
     ram = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+
     table.add_row(
         "RAM",
-        f"{ram.percent}% ({get_size(ram.used)} / {get_size(ram.total)})"
+        f"{ram.percent}% ({size(ram.used)}/{size(ram.total)})"
     )
 
-    # Disk
+    table.add_row(
+        "Swap",
+        f"{swap.percent}%"
+    )
+
     disk = psutil.disk_usage("/")
     table.add_row(
         "Disk",
-        f"{disk.percent}% ({get_size(disk.used)} / {get_size(disk.total)})"
+        f"{disk.percent}% ({size(disk.used)}/{size(disk.total)})"
     )
 
-    # Network
     net = psutil.net_io_counters()
+
+    upload = net.bytes_sent - old_net.bytes_sent
+    download = net.bytes_recv - old_net.bytes_recv
+
+    old_net = net
+
     table.add_row(
-        "Network Sent",
-        get_size(net.bytes_sent)
-    )
-    table.add_row(
-        "Network Received",
-        get_size(net.bytes_recv)
+        "Upload",
+        f"{size(upload)}/s"
     )
 
-    # Battery
+    table.add_row(
+        "Download",
+        f"{size(download)}/s"
+    )
+
     battery = psutil.sensors_battery()
     if battery:
         table.add_row(
@@ -64,8 +101,34 @@ def create_table():
             f"{battery.percent}%"
         )
 
-    # Temperature
     temps = psutil.sensors_temperatures()
+    if temps:
+        for name, values in temps.items():
+            if values:
+                table.add_row(
+                    "Temp",
+                    f"{values[0].current}°C"
+                )
+                break
+
+    uptime = int(time.time() - psutil.boot_time())
+    table.add_row(
+        "Uptime",
+        f"{uptime//3600}h {(uptime%3600)//60}m"
+    )
+
+    table.add_row(
+        "Kernel",
+        platform.release()
+    )
+
+    return table
+
+
+with Live(dashboard(), refresh_per_second=1) as live:
+    while True:
+        live.update(dashboard())
+        time.sleep(1)    temps = psutil.sensors_temperatures()
     if temps:
         for name, entries in temps.items():
             if entries:
