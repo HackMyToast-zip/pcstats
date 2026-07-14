@@ -2,13 +2,15 @@ import psutil
 import time
 import platform
 import subprocess
+import readchar
+import os
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
 
 console = Console()
+tab = 1
 
-old_net = psutil.net_io_counters()
 
 def size(bytes):
     for unit in ["B", "KB", "MB", "GB", "TB"]:
@@ -16,42 +18,68 @@ def size(bytes):
             return f"{bytes:.1f}{unit}"
         bytes /= 1024
 
-def get_cpu():
-    return platform.processor() or "Unknown"
 
 def get_gpu():
     try:
-        result = subprocess.check_output(
-            ["lspci"]
-        ).decode()
-
-        for line in result.splitlines():
+        output = subprocess.check_output(["lspci"]).decode()
+        for line in output.splitlines():
             if "VGA" in line or "3D" in line:
                 return line.split(": ", 1)[-1]
     except:
-        pass
+        return "Unknown"
 
     return "Unknown"
 
-def dashboard():
-    global old_net
 
-    table = Table(title="PC Stats Dashboard v1.2")
+def live_stats():
+    table = Table(title="PC Stats - Live")
 
     table.add_column("Component")
     table.add_column("Value")
 
     cpu = psutil.cpu_percent()
-    freq = psutil.cpu_freq()
+    ram = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
 
-    table.add_row("CPU", get_cpu())
     table.add_row("CPU Usage", f"{cpu}%")
+    table.add_row("RAM Usage", f"{ram.percent}%")
+    table.add_row("RAM Used", f"{size(ram.used)} / {size(ram.total)}")
+    table.add_row("Disk Usage", f"{disk.percent}%")
 
-    if freq:
-        table.add_row(
-            "CPU Speed",
-            f"{freq.current/1000:.2f} GHz"
-        )
+    battery = psutil.sensors_battery()
+    if battery:
+        table.add_row("Battery", f"{battery.percent}%")
+
+    temps = psutil.sensors_temperatures()
+    if temps:
+        for name, values in temps.items():
+            if values:
+                table.add_row("Temperature", f"{values[0].current}°C")
+                break
+
+    table.add_row(
+        "Uptime",
+        f"{int(time.time()-psutil.boot_time())//3600}h"
+    )
+
+    return table
+
+
+def system_info():
+    table = Table(title="PC Stats - System Info")
+
+    table.add_column("Component")
+    table.add_column("Value")
+
+    table.add_row(
+        "CPU",
+        platform.processor() or "Unknown"
+    )
+
+    table.add_row(
+        "CPU Cores",
+        str(psutil.cpu_count())
+    )
 
     table.add_row(
         "GPU",
@@ -59,13 +87,56 @@ def dashboard():
     )
 
     ram = psutil.virtual_memory()
-    swap = psutil.swap_memory()
-
     table.add_row(
-        "RAM",
-        f"{ram.percent}% ({size(ram.used)}/{size(ram.total)})"
+        "Total RAM",
+        size(ram.total)
     )
 
+    for part in psutil.disk_partitions():
+        try:
+            usage = psutil.disk_usage(part.mountpoint)
+            table.add_row(
+                f"Drive {part.device}",
+                size(usage.total)
+            )
+        except:
+            pass
+
+    table.add_row(
+        "OS",
+        platform.platform()
+    )
+
+    return table
+
+
+def main():
+    global tab
+
+    with Live(refresh_per_second=2) as live:
+        while True:
+            os.system("clear")
+
+            console.print(
+                "[1] Live Stats   [2] Info   [q] Quit\n"
+            )
+
+            if tab == 1:
+                live.update(live_stats())
+            else:
+                live.update(system_info())
+
+            key = readchar.readkey()
+
+            if key == "1":
+                tab = 1
+            elif key == "2":
+                tab = 2
+            elif key == "q":
+                break
+
+
+main()
     table.add_row(
         "Swap",
         f"{swap.percent}%"
